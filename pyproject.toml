@@ -3,15 +3,15 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "feishu-codex-automation"
+name = "codex-flow"
 version = "0.1.0"
-description = "Feishu-driven Codex automation for task intake, development, and push workflow"
+description = "Feishu-driven Codex workflow for task intake, development, and push automation"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "Codex" }]
 
 [project.scripts]
-feishu-automation = "scripts.feishu_task_runner:main"
+codex-flow = "scripts.feishu_task_runner:main"
 
 [tool.setuptools]
 packages = ["scripts"]

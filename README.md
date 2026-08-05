@@ -1,4 +1,4 @@
-# Feishu-driven Codex automation
+# Codex Flow
 
 这个目录是一套“飞书多维表 -> 本地开发执行 -> 人工审核 -> 远程推送”的自动化脚手架。
 
