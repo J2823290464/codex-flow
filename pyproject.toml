@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "feishu-codex-automation"
+version = "0.1.0"
+description = "Feishu-driven Codex automation for task intake, development, and push workflow"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Codex" }]
+
+[project.scripts]
+feishu-automation = "scripts.feishu_task_runner:main"
+
+[tool.setuptools]
+packages = ["scripts"]

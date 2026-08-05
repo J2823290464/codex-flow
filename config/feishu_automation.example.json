@@ -1,0 +1,74 @@
+{
+  "feishu": {
+    "app_id": "cli_xxx",
+    "app_secret": "xxx",
+    "wiki_url": "https://xxx.feishu.cn/wiki/xxx?table=tblxxx&view=vewxxx",
+    "wiki_node_token": "",
+    "app_token": "",
+    "table_id": "tblxxx",
+    "view_id": "",
+    "page_size": 50
+  },
+  "fields": {
+    "title": "标题",
+    "type": "类型",
+    "status": "状态",
+    "priority": "优先级",
+    "description": "需求/BUG描述",
+    "version_doc": "版本需求文档",
+    "branch": "目标分支",
+    "result": "执行结果",
+    "local_commit": "本地提交",
+    "local_git_record": "本地Git记录",
+    "remote_push": "远程推送",
+    "ai_start_time": "AI开始时间",
+    "ai_end_time": "AI结束时间"
+  },
+  "statuses": {
+    "intake": "待需求审核",
+    "pending": "待处理",
+    "in_progress": "开发中",
+    "review": "待人工审核",
+    "approved": "审核通过",
+    "pushed": "已推送",
+    "failed": "执行失败"
+  },
+  "schema": {
+    "automation_status_field": "自动化状态"
+  },
+  "workspace": {
+    "repo_path": "C:/path/to/your/repo",
+    "main_branch": "main",
+    "remote": "origin"
+  },
+  "runner": {
+    "max_tasks_per_run": 3,
+    "command_timeout_seconds": 3600,
+    "development_command": [
+      "codex",
+      "--ask-for-approval",
+      "never",
+      "exec",
+      "--sandbox",
+      "workspace-write",
+      "--cd",
+      "{repo_path}",
+      "-"
+    ],
+    "static_check_command": [
+      "D:\\Software\\NodeJs\\npm.cmd",
+      "run",
+      "lint:version"
+    ]
+  },
+  "automation": {
+    "poll_interval_seconds": 60,
+    "max_parallel_tasks": 3,
+    "execute_pending": true,
+    "push_approved": true
+  },
+  "logging": {
+    "enabled": true,
+    "command_output": false
+  }
+}
