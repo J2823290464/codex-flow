@@ -1,6 +1,7 @@
 config/*.local.json
 .env
 *.log
+*.log.*
 __pycache__/
 *.pyc
 state/**/*.json
@@ -8,4 +9,4 @@ state/*.json
 state/*.pid
 state/merge.lock/
 state/attachments/
-logs/*.log
+logs/
