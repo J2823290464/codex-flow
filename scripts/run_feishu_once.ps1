@@ -6,10 +6,13 @@ $ErrorActionPreference = "Continue"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RootDir = Split-Path -Parent $ScriptDir
 $LogDir = Join-Path $RootDir "logs"
-$Date = Get-Date -Format "yyyyMMdd"
-$LogPath = Join-Path $LogDir "feishu-automation-$Date.log"
+$LogPath = Join-Path $LogDir "feishu-automation.log"
+$MaxLogBytes = 5MB
 
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+if ((Test-Path $LogPath) -and ((Get-Item $LogPath).Length -ge $MaxLogBytes)) {
+  Move-Item -Force -Path $LogPath -Destination "$LogPath.1"
+}
 Set-Location $RootDir
 
 function Write-RunLog {

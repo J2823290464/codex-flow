@@ -21,6 +21,7 @@
     "local_commit": "本地提交",
     "local_git_record": "本地Git记录",
     "remote_push": "远程推送",
+    "deployment_result": "部署结果",
     "ai_start_time": "AI开始时间",
     "ai_end_time": "AI结束时间"
   },
@@ -34,7 +35,8 @@
     "failed": "执行失败"
   },
   "schema": {
-    "automation_status_field": "自动化状态"
+    "automation_status_field": "自动化状态",
+    "cache_path": "state/feishu_schema_cache.json"
   },
   "workspace": {
     "repo_path": "C:/path/to/your/repo",
@@ -44,15 +46,20 @@
   "runner": {
     "max_tasks_per_run": 3,
     "command_timeout_seconds": 3600,
+    "commit_after_development": true,
+    "include_images": true,
+    "image_fields": [],
+    "version_doc_dir": "docs/requirements",
+    "version_doc_extension": ".md",
     "development_command": [
       "codex",
       "--ask-for-approval",
       "never",
-      "exec",
       "--sandbox",
       "workspace-write",
       "--cd",
       "{repo_path}",
+      "exec",
       "-"
     ],
     "static_check_command": [
@@ -64,11 +71,40 @@
   "automation": {
     "poll_interval_seconds": 60,
     "max_parallel_tasks": 3,
+    "parallel_mode": "serial",
+    "worktree_dir": "",
+    "allow_parallel_same_repo": false,
     "execute_pending": true,
     "push_approved": true
   },
+  "deployment": {
+    "enabled": false,
+    "strategy": "docker",
+    "timeout_seconds": 1800,
+    "command": [],
+    "commands": [],
+    "docker": {
+      "host": "deploy@example.com",
+      "ssh_port": 22,
+      "identity_file": "",
+      "repo_path": "/srv/your-app",
+      "compose_command": [
+        "docker",
+        "compose"
+      ],
+      "compose_file": "docker-compose.yml",
+      "project_name": "",
+      "services": [],
+      "pull_before_up": false,
+      "build": true,
+      "remove_orphans": true
+    }
+  },
   "logging": {
     "enabled": true,
+    "file_enabled": true,
+    "file_path": "logs/feishu-runner.log",
+    "verbose": false,
     "command_output": false
   }
 }

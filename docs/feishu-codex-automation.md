@@ -2,7 +2,7 @@
 
 ## 目标
 
-通过飞书开放平台应用读取多维表里的需求和 BUG，自动完成任务领取、开发执行、本地提交、状态同步，并在人工审核通过后推送远程 `main`。
+通过飞书开放平台应用读取多维表里的需求和 BUG，自动完成任务领取、开发执行、本地提交、状态同步，并在人工审核通过后推送远程 `main`，可选自动部署到服务器。
 
 ## 多维表字段建议
 
@@ -18,6 +18,7 @@
 | 执行结果 | 多行文本 | 自动化写入执行摘要或错误 |
 | 本地提交 | 文本 | 自动化写入本地 commit hash |
 | 远程推送 | 文本 | 自动化写入远程推送结果 |
+| 部署结果 | 文本 | 可选字段；自动化写入服务器部署结果 |
 | AI开始时间 | 日期时间 | 自动化领取任务并开始执行时写入 |
 | AI结束时间 | 日期时间 | 自动化执行成功或失败时写入 |
 
@@ -55,6 +56,8 @@ flowchart LR
   C -->|执行失败| F["执行失败"]
   D -->|人工改状态| E["审核通过"]
   E -->|自动推送远程 main| G["已推送"]
+  G -->|deployment.enabled=true| H["自动部署服务器"]
+  H -->|部署失败| F
 ```
 
 建议把飞书多维表的 `状态` 字段设成单选，并固定这些选项，避免自动化读到拼写不同的状态。
@@ -68,10 +71,11 @@ flowchart LR
 5. 执行配置里的开发命令。默认开发命令是 `codex exec`，也就是由 Codex AI 根据飞书需求修改本地仓库。
 6. 运行配置里的静态校验命令。按你的约束，不启动本地服务测试。
 7. 提交到本地 `main`。
-8. 写回飞书：`状态 = 待人工审核`，并记录 commit hash。
+8. 写回飞书：`状态 = 待人工审核`，并把 Codex 输出、静态校验结果、本地 Git 记录和 commit hash 汇总到 `执行结果`，方便人工审核。
 9. 等待人工审核。人工确认后，把飞书状态改成 `审核通过`。
 10. 推送远程：自动化只推送 `审核通过` 的记录。
-11. 写回飞书：`状态 = 已推送`。
+11. 如果开启 `deployment.enabled`，自动执行部署命令；默认策略是 SSH 到服务器执行 Docker Compose 部署。
+12. 写回飞书：`状态 = 已推送`，并记录远程推送和部署结果。
 
 ## 养鸡庄园专项约束
 
@@ -88,6 +92,7 @@ flowchart LR
 - 飞书 `app_id` 和 `app_secret` 放在本地配置 `config/feishu_automation.local.json`。
 - 不要把 `config/*.local.json` 提交到仓库。
 - 推送远程前以飞书状态 `审核通过` 作为人工闸门。
+- 自动部署只发生在远程推送成功后；部署失败会回写 `执行失败`，并把失败原因写入部署结果或远程推送字段。
 - 建议飞书应用只开放目标多维表所需权限。
 
 ## 推荐运行方式
@@ -97,17 +102,20 @@ flowchart LR
 - `--mode list`：只读检查任务。
 - `--mode execute`：领取并执行 `待处理` 任务。
 - `--mode push-approved`：推送人工审核通过的任务。
+- 如果 `deployment.enabled=true`，`push-approved` 会在推送成功后继续自动部署服务器。
 - `--mode watch`：常驻后台 worker，定时读取飞书并自动执行。
 - `--mode claim-next`：只读取/领取一条飞书任务，输出给 Codex 开发。
 - `--mode finish-task`：开发成功后回写飞书。
 - `--mode fail-task`：开发失败后回写飞书。
-其中 `watch` 会按配置并发处理任务，默认最多同时跑 3 个需求或 BUG。
+其中 `watch` 会按配置处理任务；默认同一目标仓库串行执行，避免多个任务同时改同一个本地 `main` 导致提交归属混乱。
 
 生产环境建议拆成两个定时任务：
 
 - 每 10 到 30 分钟运行一次 `execute`。
-- 每 5 到 10 分钟运行一次 `push-approved`。
+- 每 5 到 10 分钟运行一次 `push-approved`；开启部署后，这一步也负责上线。
 - 或者直接常驻运行 `watch`。
+
+如果不想在本地开 cmd 常驻，可以使用 Codex 定时自动化来定时执行同一个流程。建议让自动化在仓库目录里周期性运行 `execute` 和 `push-approved`；飞书表仍然负责人工审核闸门，服务器部署由 `deployment` 配置控制。
 
 如果要把提权范围限制在飞书 API，推荐 Codex 自动化使用拆分流程：
 
@@ -150,30 +158,70 @@ python scripts/feishu_task_runner.py --config config/feishu_automation.local.jso
 ```
 
 配置项：
-`automation.max_parallel_tasks` 默认 3，用来限制同一时间最多并行处理的任务数。
+`automation.parallel_mode` 控制是否启用多任务模式：
+
+- `serial`：默认值。同一目标仓库串行执行，避免多个 Codex 任务共享同一个工作区。
+- `worktree`：每个任务使用独立的 git worktree 和本地任务分支，可同时开发多个任务；任务分支只保留在本地，不会推送到远程仓库。
+
+`automation.max_parallel_tasks` 默认 1，最大 3，限制同一时间最多并行处理的任务数。`worktree_dir` 可以指定 worktree 存放目录；留空时默认放在目标仓库同级目录的 `<仓库名>-worktrees/` 下。
 
 ```json
 "automation": {
   "poll_interval_seconds": 60,
+  "max_parallel_tasks": 3,
+  "parallel_mode": "worktree",
+  "worktree_dir": "C:/path/to/repo-worktrees",
+  "allow_parallel_same_repo": false,
   "execute_pending": true,
   "push_approved": true
 },
 "logging": {
   "enabled": true,
+  "file_enabled": true,
+  "file_path": "logs/feishu-runner.log",
+  "verbose": false,
   "command_output": false
 }
 ```
+
+### 多任务模式（worktree）
+
+启用 `parallel_mode=worktree` 后，worker 领取任务时会为每条记录创建：
+
+- 本地分支：`feishu/<record_id>`
+- 独立 worktree：`<worktree_dir>/<record_id>`
+
+流程如下：
+
+1. 领取任务时，基于当时本地 `main` 的 HEAD 创建 worktree 和任务分支。
+2. Codex 在对应 worktree 里开发，静态校验也在该 worktree 里运行。
+3. Codex 把改动提交到本地任务分支，不切换分支，不推送远程。
+4. 任务开发完成后，runner 在本地 `main` 上加锁串行合并 `feishu/<record_id>`。
+5. 合并成功后，runner 把任务摘要追加到飞书记录里填写的版本需求文档，例如 `docs/requirements/0.2.1.md`，再单独提交到本地 `main`。
+6. 飞书写回 `待人工审核`，记录的 `本地提交` 是本地 `main` 上合并后的最终 commit。
+7. 人工审核通过后，只推送本地 `main`；任务分支和 worktree 在推送完成并写回 `已推送` 后自动清理。
+
+合并遇到冲突时，runner 会中止合并，把任务标记为 `执行失败`，并在错误信息里列出冲突文件；worktree 和任务分支会保留，方便人工解决后通过 `retry-failed` 只重试合并。
 
 worker 会按 `poll_interval_seconds` 定时拉飞书：
 
 - 发现 `待处理` 时，调用 `codex exec` 领取并开发。
 - `待需求审核` 不会被 AI 执行，需要人工确认后改成 `待处理`。
-- 本地提交完成后，写回 `待人工审核`。
+- worktree 模式下任务分支合并到本地 `main` 后，写回 `待人工审核`。
 - 人工把飞书状态改成 `审核通过` 后，自动推送远程 `main` 并写回 `已推送`。
+- 如果开启部署，推送成功后会自动部署服务器，并写回 `部署结果`；没有该字段时会写入 `远程推送`。
+- 每条任务必须产生相对领取时 `base_commit` 的新本地提交；没有新提交会进入 `执行失败`，不会复用当前 HEAD。
+- 推送前会校验所有 `审核通过` 记录的 `本地提交`：为空、重复、本地不存在或不在本地 `main` 上的 commit 都会阻止推送。
+- worktree 模式下的 `feishu/*` 任务分支只创建在本地，任何流程都不会推送任务分支到远程仓库。
 - worker 领取任务时写入 `AI开始时间`。
 - worker 执行成功或失败时写入 `AI结束时间`。
-- `logging.enabled` 控制中文运行日志。
+- `logging.enabled` 控制控制台中文运行日志。
+- `logging.file_enabled` 控制是否把 runner 自身日志写入文件。
+- `logging.file_path` 控制日志文件路径；留空时默认写入 `logs/feishu-runner.log`。
+- `logging.verbose` 控制是否输出每轮 token、字段、记录读取等详细轮询日志；默认关闭，只保留关键事件。
 - `logging.command_output` 控制是否打印 Codex、静态校验和 Git push 的命令输出，调试时建议打开。
+
+`state/tasks/*.json` 只保留 Codex、静态校验等长输出的摘要，避免状态文件膨胀到难以阅读；完整审核摘要仍会回写到飞书 `执行结果` 字段。
 
 ## 表结构自动识别
 
@@ -200,9 +248,12 @@ python scripts/feishu_task_runner.py --config config/feishu_automation.local.jso
 
 ```json
 "schema": {
-  "automation_status_field": "自动化状态"
+  "automation_status_field": "自动化状态",
+  "cache_path": "state/feishu_schema_cache.json"
 }
 ```
+
+第一次执行 `list`、`execute`、`push-approved`、`claim-next`、`finish-task` 或 `fail-task` 时，脚本会读取一次飞书字段结构并把匹配好的字段和状态写入 `schema.cache_path`。后续定时执行会直接复用本地缓存，不再每轮扫描字段；如果你改了飞书表结构，重新运行 `--mode sync-schema` 即可刷新缓存。
 
 这样原有 `状态` 字段可以继续表达业务含义，`自动化状态` 专门用于：
 
@@ -214,6 +265,70 @@ python scripts/feishu_task_runner.py --config config/feishu_automation.local.jso
 - `已推送`
 - `执行失败`
 
+可选字段 `部署结果` 不会阻断老表运行；执行 `--mode sync-schema` 时会自动补齐。
+
+## 自动部署配置
+
+部署默认关闭。开启后，`push-approved` 会先推送远程 `main`，再执行部署，最后回写飞书。
+
+默认 Docker 部署：
+
+```json
+"deployment": {
+  "enabled": true,
+  "strategy": "docker",
+  "timeout_seconds": 1800,
+  "docker": {
+    "host": "deploy@example.com",
+    "ssh_port": 22,
+    "identity_file": "",
+    "repo_path": "/srv/your-app",
+    "compose_command": ["docker", "compose"],
+    "compose_file": "docker-compose.yml",
+    "project_name": "",
+    "services": [],
+    "pull_before_up": false,
+    "build": true,
+    "remove_orphans": true
+  }
+}
+```
+
+默认生成的服务器命令会通过 SSH 执行：
+
+```bash
+cd /srv/your-app
+git fetch origin main
+git checkout main
+git pull --ff-only origin main
+docker compose -f docker-compose.yml up -d --build --remove-orphans
+```
+
+如果服务器需要先拉镜像，把 `pull_before_up` 改成 `true`。如果只部署部分服务，在 `services` 里写服务名数组。
+
+自定义单条部署命令：
+
+```json
+"deployment": {
+  "enabled": true,
+  "command": "ssh deploy@example.com \"cd /srv/your-app && ./deploy.sh\""
+}
+```
+
+自定义多步部署命令：
+
+```json
+"deployment": {
+  "enabled": true,
+  "commands": [
+    "ssh deploy@example.com \"cd /srv/your-app && git pull --ff-only origin main\"",
+    "ssh deploy@example.com \"cd /srv/your-app && docker compose up -d --build\""
+  ]
+}
+```
+
+`command` 支持字符串，也支持参数数组；`commands` 表示命令序列。可用占位符包括 `{repo_path}`、`{remote}`、`{branch}`、`{main_branch}`、`{pushed_commits}`。
+
 ## Codex AI 配置
 
 `runner.development_command` 可以直接调用 Codex CLI：
@@ -221,16 +336,18 @@ python scripts/feishu_task_runner.py --config config/feishu_automation.local.jso
 ```json
 [
   "codex",
-  "exec",
   "--ask-for-approval",
   "never",
   "--sandbox",
   "workspace-write",
   "--cd",
   "{repo_path}",
+  "exec",
   "-"
 ]
 ```
+
+脚本会在运行前规范化 Codex 数组命令：`--ask-for-approval never`、`--sandbox workspace-write` 和 `--cd {repo_path}` 会放在 `exec` 前面；如果旧配置缺少可写沙箱或写成 `read-only`，会自动改为 `workspace-write`。
 
 占位符说明：
 
@@ -240,3 +357,39 @@ python scripts/feishu_task_runner.py --config config/feishu_automation.local.jso
 默认命令最后的 `-` 表示从 stdin 读取需求，适合飞书描述较长的任务。如果你更想在命令参数里显式传 prompt，也可以把 `-` 改成 `{task_prompt}`。
 
 默认使用当前 Codex CLI 的登录态和模型配置。如果自动化跑在计划任务或独立 runner 里，需要确保那个运行用户已经执行过 `codex login`，或者能访问同一个 `CODEX_HOME`。
+
+## 本地提交方式
+
+`runner.commit_after_development` 控制是否由自动化脚本负责本地提交：
+
+```json
+"runner": {
+  "commit_after_development": true
+}
+```
+
+- `true`：默认行为。Codex 修改和静态校验完成后，runner 会执行 `git add -A` 和 `git commit`，然后把提交号回写飞书。
+- `false`：runner 不执行 `git add` / `git commit`，只读取当前 `HEAD` 和本地 Git 记录并回写飞书。适合已经要求 AI 会话自己完成本地提交的场景。
+
+当 `commit_after_development=false` 时，runner 会要求目标仓库工作区是干净的；如果 AI 只改了代码但没有提交，任务会失败并提示需要让 AI 提交，避免未提交代码被误标为“待人工审核”。
+
+这个配置只影响“本地提交”阶段，不影响“审核通过后推送远程”。远程推送仍然由 `automation.push_approved` 或手动 `--mode push-approved` 控制，只处理飞书状态为 `审核通过` 的记录。
+
+如果 `commit_after_development=false` 但 Codex 开发结束后仍有未提交改动，runner 会先尝试接着刚刚的 Codex 会话补发一次“只完成本地提交”的指令；补提交后工作区仍不干净时才会失败。
+
+## 图片附件
+
+`runner.include_images` 控制是否把飞书图片附件传给 Codex：
+
+```json
+"runner": {
+  "include_images": true,
+  "image_fields": []
+}
+```
+
+- `include_images=true`：默认开启。领取任务时会下载飞书记录中的图片附件，并给 Codex CLI 追加 `--image <path>`。
+- `image_fields=[]`：自动扫描所有附件字段，只处理 `image/*` 图片。
+- `image_fields=["图片"]`：只扫描指定字段，适合表里有多个附件字段但只有部分需要给 AI 的场景。
+
+图片会缓存到 `state/attachments/<record_id>/`，任务 state 会记录 `image_paths`。失败重试或继续会话时，会复用这些本地图片路径。
